@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: build-binaries-${{ github.ref }}
@@ -19,37 +19,110 @@ concurrency:
 
 env:
   APP_NAME: notion2api
+  PACKAGE_MAIN: ./cmd/notion2api
 
 jobs:
+  test:
+    name: Test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-22.04
+          - ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run tests
+        run: go test ./...
+
   build:
-    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+    name: Build ${{ matrix.target }}
+    needs: test
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - goos: windows
+          - target: windows-amd64
+            goos: windows
             goarch: amd64
+            goarm: ""
             ext: .exe
             archive: zip
-          - goos: windows
+          - target: windows-arm64
+            goos: windows
             goarch: arm64
+            goarm: ""
             ext: .exe
             archive: zip
-          - goos: linux
+          - target: linux-amd64
+            goos: linux
             goarch: amd64
+            goarm: ""
             ext: ""
             archive: tar.gz
-          - goos: linux
+          - target: linux-386
+            goos: linux
+            goarch: "386"
+            goarm: ""
+            ext: ""
+            archive: tar.gz
+          - target: linux-arm64
+            goos: linux
             goarch: arm64
+            goarm: ""
             ext: ""
             archive: tar.gz
-          - goos: darwin
+          - target: linux-armv6
+            goos: linux
+            goarch: arm
+            goarm: "6"
+            ext: ""
+            archive: tar.gz
+          - target: linux-armv7
+            goos: linux
+            goarch: arm
+            goarm: "7"
+            ext: ""
+            archive: tar.gz
+          - target: linux-riscv64
+            goos: linux
+            goarch: riscv64
+            goarm: ""
+            ext: ""
+            archive: tar.gz
+          - target: linux-ppc64le
+            goos: linux
+            goarch: ppc64le
+            goarm: ""
+            ext: ""
+            archive: tar.gz
+          - target: linux-s390x
+            goos: linux
+            goarch: s390x
+            goarm: ""
+            ext: ""
+            archive: tar.gz
+          - target: darwin-amd64
+            goos: darwin
             goarch: amd64
+            goarm: ""
             ext: ""
             archive: tar.gz
-          - goos: darwin
+          - target: darwin-arm64
+            goos: darwin
             goarch: arm64
+            goarm: ""
             ext: ""
             archive: tar.gz
 
@@ -79,17 +152,23 @@ jobs:
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
           BIN_EXT: ${{ matrix.ext }}
           ARCHIVE_KIND: ${{ matrix.archive }}
+          TARGET: ${{ matrix.target }}
           VERSION: ${{ steps.version.outputs.value }}
         run: |
           set -euo pipefail
           bin_name="${APP_NAME}${BIN_EXT}"
-          package_name="${APP_NAME}_${VERSION}_${GOOS}_${GOARCH}"
+          package_name="${APP_NAME}_${VERSION}_${TARGET}"
           staging_dir="dist/${package_name}"
 
           mkdir -p "${staging_dir}"
-          CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "${staging_dir}/${bin_name}" ./cmd/notion2api
+          export CGO_ENABLED=0 GOOS GOARCH
+          if [[ -n "${GOARM}" ]]; then
+            export GOARM
+          fi
+          go build -trimpath -ldflags="-s -w" -o "${staging_dir}/${bin_name}" "${PACKAGE_MAIN}"
 
           cp README.md "${staging_dir}/"
           cp LICENSE "${staging_dir}/"
@@ -108,7 +187,7 @@ jobs:
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.APP_NAME }}-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: ${{ env.APP_NAME }}-${{ matrix.target }}
           path: |
             dist/*.zip
             dist/*.tar.gz
@@ -120,6 +199,8 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Download artifacts
@@ -127,6 +208,12 @@ jobs:
         with:
           path: release-assets
           merge-multiple: true
+
+      - name: Generate checksums
+        shell: bash
+        run: |
+          cd release-assets
+          sha256sum * > SHA256SUMS.txt
 
       - name: Publish GitHub release assets
         uses: softprops/action-gh-release@v2
