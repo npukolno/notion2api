@@ -1681,12 +1681,16 @@ func (a *App) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if payload != nil && (typed.likelySillyTavernByEnvelope() || isLikelySillyTavernPayload(payload)) {
+	toolDefs := parseToolDefinitions(typed.Tools)
+	hasTools := len(toolDefs) > 0
+	// A request carrying OpenAI tools is an agentic client (opencode, Cursor,
+	// Droid...), never a SillyTavern roleplay frontend — even if stray
+	// ST-like fields are present. The ST path cannot handle tools, so it must
+	// not swallow tool-carrying requests.
+	if !hasTools && payload != nil && (typed.likelySillyTavernByEnvelope() || isLikelySillyTavernPayload(payload)) {
 		a.handleSillyTavernChatCompletionsPayload(w, r, payload)
 		return
 	}
-	toolDefs := parseToolDefinitions(typed.Tools)
-	hasTools := len(toolDefs) > 0
 	if hasTools {
 		toolNames := make([]string, 0, len(toolDefs))
 		for _, t := range toolDefs {
