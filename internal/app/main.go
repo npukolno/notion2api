@@ -1693,6 +1693,16 @@ func (a *App) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 			toolNames = append(toolNames, t.Function.Name)
 		}
 		log.Printf("[tools] model=%s tools=%d [%s] choice=%s", requestedModelForLog(typed.Model), len(toolDefs), strings.Join(toolNames, ","), toolChoiceForLog(typed.ToolChoice))
+	} else {
+		rawPayloadKeys := ""
+		if payload != nil {
+			keys := make([]string, 0, len(payload))
+			for k := range payload {
+				keys = append(keys, k)
+			}
+			rawPayloadKeys = strings.Join(keys, ",")
+		}
+		log.Printf("[chat-notools] model=%s msgs=%d stream=%v payload_keys=[%s]", requestedModelForLog(typed.Model), len(sliceValue(typed.Messages)), typed.Stream, rawPayloadKeys)
 	}
 	messagesWithTools := typed.Messages
 	if hasTools {
