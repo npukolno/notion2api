@@ -53,6 +53,7 @@ func buildToolSystemPrompt(tools []toolDefinition) string {
 		return ""
 	}
 	var b strings.Builder
+	b.WriteString("You are a coding agent running on the user's own machine. You DO have filesystem and shell access through the tools below. Never claim you cannot access local files, never ask the user to paste terminal output or file contents — always emit a tool call instead.\n\n")
 	b.WriteString("You have access to the following tools. When you need to call a tool, you MUST output ONLY the XML block below and nothing else.\n\n")
 	b.WriteString("<tools_available>\n")
 	for _, t := range tools {
@@ -278,6 +279,7 @@ func extractLikelyPath(prompt string) string {
 		}
 	}
 	patterns := []*regexp.Regexp{
+		regexp.MustCompile(`(?i)(~/(?:[^\s'"` + "`" + `]+/?)+)`),
 		regexp.MustCompile(`(?i)(/(?:[^\s'"` + "`" + `]+/?)+)`),
 		regexp.MustCompile(`(?i)(\.\.?/(?:[^\s'"` + "`" + `]+/?)+)`),
 		regexp.MustCompile(`(?i)\b([\w.-]+/[\w./-]+)`),
@@ -428,23 +430,39 @@ func intentKeywordsForTool(name string, description string) []string {
 	text := name + " " + description
 	keywords := []string{}
 	add := func(values ...string) { keywords = append(keywords, values...) }
+	// Generic file-system words (RU + EN): attached to every file-related
+	// family so Russian prompts ("посмотри файлы в ...") match even when the
+	// tool description is English. Score ties are acceptable — the agent loop
+	// course-corrects on the next turn.
+	fileWordsRU := []string{"файл", "файлы", "файлов", "папка", "папку", "папке", "директория", "директорию", "путь", "пути", "проект", "код"}
 	if strings.Contains(text, "read") || strings.Contains(text, "file") || strings.Contains(text, "cat") {
 		add("read", "open", "view", "inspect", "show file", "xem", "đọc")
+		add("прочитай", "прочти", "прочитать", "открой", "открыть", "покажи файл", "посмотри файл", "содержимое файла", "что внутри", "покажи код")
+		add(fileWordsRU...)
 	}
 	if strings.Contains(text, "edit") || strings.Contains(text, "replace") || strings.Contains(text, "patch") || strings.Contains(text, "modify") {
 		add("edit", "replace", "change", "modify", "patch", "update", "sửa")
+		add("исправь", "исправить", "измени", "изменить", "поменяй", "замени", "заменить", "отредактируй", "добавь", "добавить", "удали", "удалить", "поправь")
+		add(fileWordsRU...)
 	}
 	if strings.Contains(text, "create") || strings.Contains(text, "write") {
 		add("create", "write", "new file", "save")
+		add("создай", "создать", "напиши", "написать", "запиши", "записать", "сохрани", "сохранить", "создай файл")
+		add(fileWordsRU...)
 	}
 	if strings.Contains(text, "list") || strings.Contains(text, "dir") || strings.Contains(text, "ls") {
 		add("list", "ls", "directory", "folder")
+		add("посмотри", "посмотреть", "покажи", "показать", "список", "что за файлы", "что внутри папки", "содержимое папки", "перечисли")
+		add(fileWordsRU...)
 	}
-	if strings.Contains(text, "grep") || strings.Contains(text, "search") || strings.Contains(text, "find") {
+	if strings.Contains(text, "grep") || strings.Contains(text, "search") || strings.Contains(text, "find") || strings.Contains(text, "glob") || strings.Contains(text, "pattern") {
 		add("grep", "search", "find", "rg", "pattern")
+		add("найди", "найти", "поиск", "поищи", "где используется", "где находится", "содержит")
+		add(fileWordsRU...)
 	}
-	if strings.Contains(text, "execute") || strings.Contains(text, "command") || strings.Contains(text, "shell") || strings.Contains(text, "run") {
+	if strings.Contains(text, "execute") || strings.Contains(text, "command") || strings.Contains(text, "shell") || strings.Contains(text, "run") || strings.Contains(text, "bash") || strings.Contains(text, "terminal") {
 		add("execute", "run", "command", "shell", "terminal")
+		add("запусти", "запустить", "выполни", "выполнить", "команда", "команду", "терминал", "собери", "собрать", "установи", "проверь командой")
 	}
 	if strings.Contains(text, "weather") || strings.Contains(text, "location") {
 		add("weather", "city", "location")
@@ -468,6 +486,14 @@ func inferArgumentValue(prompt string, tool toolDefinition, name string, schema 
 			}
 		case strings.Contains(lowerName, "pattern") || strings.Contains(lowerName, "query") || strings.Contains(lowerName, "regex"):
 			if value := extractSearchPattern(prompt); value != "" {
+				return value, true
+			}
+			// "посмотри файлы в <dir>" — no explicit pattern, but a path is
+			// present: use it as a glob base so directory listings work.
+			if value := extractLikelyPath(prompt); value != "" {
+				if !strings.ContainsAny(value, "*?[") {
+					value += "/**"
+				}
 				return value, true
 			}
 		case strings.Contains(lowerName, "command") || strings.Contains(lowerName, "cmd"):
