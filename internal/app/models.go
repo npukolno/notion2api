@@ -55,6 +55,7 @@ func builtinModelDefinitions() []ModelDefinition {
 		{ID: "gemini-3-flash", Name: "Gemini 3 Flash", NotionModel: "gingerbread", Family: "gemini", Group: "fast", Enabled: true, Aliases: []string{"gingerbread"}},
 		{ID: "opus-4.8", Name: "Opus 4.8", NotionModel: "ambrosia-tart-high", Family: "anthropic", Group: "intelligent", Beta: true, Enabled: true, Aliases: []string{"claude-opus-4.8", "opus48", "ambrosia-tart-high"}},
 		{ID: "gpt-5.5", Name: "GPT-5.5", NotionModel: "opal-quince-medium", Family: "openai", Group: "fast", Beta: true, Enabled: true, Aliases: []string{"gpt55", "opal-quince-medium"}},
+		{ID: "gpt-6-astra", Name: "GPT-6 Astra", NotionModel: "orlando-quinn", Family: "openai", Group: "intelligent", Beta: true, Enabled: true, Aliases: []string{"gpt6astra", "gpt-6astra", "orlando-quinn"}},
 	}
 }
 
