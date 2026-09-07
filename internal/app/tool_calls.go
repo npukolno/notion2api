@@ -533,7 +533,7 @@ func inferArgumentValue(prompt string, tool toolDefinition, name string, schema 
 			if value := extractContent(prompt); value != "" {
 				return value, true
 			}
-		case strings.Contains(lowerName, "subagent") || lowerName == "agent" || lowerName == "agent_type":
+		case strings.Contains(lowerName, "subagent") || lowerName == "agent" || lowerName == "agent_type" || lowerName == "shadow":
 			if value := extractSubagentType(prompt); value != "" {
 				return value, true
 			}
@@ -633,6 +633,12 @@ func rankToolsByScore(prompt string, tools []toolDefinition, mode string) []scor
 			if strings.Contains(lowerPrompt, keyword) {
 				score += 10
 			}
+		}
+		// Shadow-agent names (beru/igris/...) belong to the arise_* tools:
+		// boost them so delegation prompts don't land on the generic task tool
+		// (whose subagent types may not include arise shadows).
+		if isAriseToolDef(name, desc) && mentionsShadowName(lowerPrompt) {
+			score += 60
 		}
 		famText := name + " " + desc
 		isReader := strings.Contains(famText, "read") || strings.Contains(famText, "file") || strings.Contains(famText, "cat") || strings.Contains(famText, "edit") || strings.Contains(famText, "replace") || strings.Contains(famText, "patch")
@@ -1003,4 +1009,23 @@ func buildFinalTextCompletion(latestPrompt string, text string, modelID string) 
 		}},
 		"usage": map[string]any{"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
 	}
+}
+
+// isAriseToolDef: arise_* shadow-agent tools (beru/igris/... executors).
+func isAriseToolDef(name, desc string) bool {
+	if strings.HasPrefix(name, "arise_") {
+		return true
+	}
+	combined := name + " " + desc
+	return strings.Contains(combined, "shadow agent") || strings.Contains(combined, "shadow-agent")
+}
+
+// mentionsShadowName: prompt names a specific shadow (beru/igris/...).
+func mentionsShadowName(lowerPrompt string) bool {
+	for _, s := range []string{"beru", "igris", "bellion", "tusk", "tank", "shadow-sovereign", "esil"} {
+		if strings.Contains(lowerPrompt, s) {
+			return true
+		}
+	}
+	return false
 }
