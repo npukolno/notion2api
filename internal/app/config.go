@@ -109,6 +109,11 @@ type NotionAccount struct {
 	Priority            int    `json:"priority,omitempty"`
 	HourlyQuota         int    `json:"hourly_quota,omitempty"`
 	MaxConcurrency      int    `json:"max_concurrency,omitempty"`
+	// DisableAutoRelogin skips email-code auto-relogin on auth failures.
+	// Useful for alias entries sharing one Notion session (e.g. a second
+	// workspace under a different account key): relogin would request a
+	// signup code for an address that is not a real Notion login.
+	DisableAutoRelogin  bool   `json:"disable_auto_relogin,omitempty"`
 	WindowStartedAt     string `json:"window_started_at,omitempty"`
 	WindowRequestCount  int    `json:"window_request_count,omitempty"`
 	CooldownUntil       string `json:"cooldown_until,omitempty"`

@@ -178,6 +178,20 @@ curl -b admin.cookie -s http://127.0.0.1:8787/admin/accounts/manual \
    (выбери другой воркспейс в промпте). Проверка — `GET /admin/accounts` должен
    показать обе записи со статусом `ready` и разными `space_id`.
 
+> Важно: вторая запись делит одну сессию Notion с первой. Поэтому у неё надо
+> отключить email-перелогин, иначе мост будет слать signup-код на адрес-алиас
+> (такого логина в Notion нет — только спам и статус `failed`):
+> ```bash
+> curl -b admin.cookie -s http://127.0.0.1:8787/admin/accounts \
+>   -H 'Content-Type: application/json' \
+>   -d '{"email":"твоя-почта+ws2@gmail.com","disable_auto_relogin":true}'
+> ```
+> Когда сессия умрёт, перелогинься один раз через основную запись
+> (`/admin/accounts/login/start` + `/login/verify` с кодом из письма),
+> а свежие куки перелей во вторую запись скриптом `sync_cookies.py`-типа:
+> скопируй массив `cookies` из её `probe.json` в `probe.json` второй записи
+> (поля `space_id`/`space_view_id` второй записи не трогать) и рестартни сервис.
+
 > Кука — это полный доступ к твоему Notion. Не коммить её, не кидай в чаты,
 > файл с кукой храни с правами `chmod 600`.
 

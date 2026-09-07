@@ -332,6 +332,12 @@ func (cfg *AppConfig) UpsertAccount(account NotionAccount) (NotionAccount, int) 
 		if account.TotalFailures == 0 {
 			account.TotalFailures = existing.TotalFailures
 		}
+		// DisableAutoRelogin defaults to false, which is indistinguishable from
+		// "not provided" — preserve the stored value unless explicitly set.
+		// (To clear it, edit the stored state directly.)
+		if !account.DisableAutoRelogin {
+			account.DisableAutoRelogin = existing.DisableAutoRelogin
+		}
 		cfg.Accounts[index] = account
 		return account, index
 	}

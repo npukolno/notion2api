@@ -592,7 +592,7 @@ func (a *App) runPromptWithAccountPool(r *http.Request, request PromptRunRequest
 			return InferenceResult{}, err
 		}
 
-		if retryable {
+		if retryable && !account.DisableAutoRelogin {
 			reloginCfg, _ := a.State.startAutoRelogin(ctx, cfg, account, "request_auth_failed")
 			cfg = reloginCfg
 			if updated, _, ok := cfg.FindAccount(account.Email); ok {
@@ -774,7 +774,7 @@ func (a *App) runPromptWithAccountPoolWithSink(r *http.Request, request PromptRu
 			return InferenceResult{}, err
 		}
 
-		if retryable {
+		if retryable && !account.DisableAutoRelogin {
 			reloginCfg, _ := a.State.startAutoRelogin(ctx, cfg, account, "request_auth_failed")
 			cfg = reloginCfg
 			if updated, _, ok := cfg.FindAccount(account.Email); ok {
