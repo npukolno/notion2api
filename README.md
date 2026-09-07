@@ -1,281 +1,348 @@
-# Notion2API - Fork with Tool Calls Support
+# Notion2API — агентный мост Notion AI → OpenAI API
 
-Một bridge service mã nguồn mở, viết bằng Go, chuyển đổi Notion AI thành API tương thích OpenAI. Fork này bổ sung hỗ trợ **tool_calls** (function calling) ở cấp gateway, cho phép tích hợp với các AI agent như Droid, Cursor, Windsurf, và các công cụ hỗ trợ OpenAI function calling khác.
+Мост с открытым кодом на Go: превращает подписку **Notion AI** в API, совместимый с OpenAI.
+Главная фишка этого форка — поддержка **tool_calls (function calling)** на уровне гейтвея:
+модели из Notion можно использовать как агентов — с чтением файлов, вызовом инструментов,
+мультитуром — в OpenCode, Cursor, Droid, Windsurf и любом клиенте, который умеет function calling.
 
-## Tính năng chính
+> Неофициальный reverse-engineered инструмент, использует внутренний веб-API Notion.
+> Работает через твою подписку Notion AI (включая Business Trial).
 
-### API tương thích OpenAI
-- `/v1/models` - Danh sách models có sẵn
-- `/v1/chat/completions` - Chat completions (hỗ trợ streaming)
-- `/v1/responses` - Responses API
-- `/healthz` - Health check
+---
 
-### Models được hỗ trợ
-| Model ID | Codename Notion | Provider | Ghi chú |
-|----------|----------------|----------|---------|
-| `auto` | (tự động) | System | Mặc định |
-| `opus-4.8` | `ambrosia-tart-high` | Anthropic | Mới nhất |
-| `opus-4.7` | `apricot-sorbet-medium` | Anthropic | |
-| `opus-4.6` | `avocado-froyo-medium` | Anthropic | |
-| `gpt-5.5` | `opal-quince-medium` | OpenAI | Mới nhất |
-| `gpt-5.4` | `oval-kumquat-medium` | OpenAI | |
-| `gpt-5.2` | `oatmeal-cookie` | OpenAI | |
-| `grok-4.3` | `xigua-mochi-medium` | xAI | Mới nhất |
-| `sonnet-4.6` | `almond-croissant-low` | Anthropic | |
-| `haiku-4.5` | `anthropic-haiku-4.5` | Anthropic | |
-| `gemini-3.1-pro` | `galette-medium-thinking` | Google | |
-| `gemini-2.5-flash` | `vertex-gemini-2.5-flash` | Google | |
-| `gemini-3-flash` | `gingerbread` | Google | |
-| `minimax-m2.5` | `fireworks-minimax-m2.5` | MiniMax | |
+## Что умеет
 
-### Tool Calls (Function Calling)
-Fork này bổ sung hỗ trợ tool_calls ở cấp gateway:
-- **Deterministic synthesis**: Gateway tự tạo tool_call từ prompt client
-- **Hỗ trợ các tool phổ biến**: `read_file`, `edit_file`, `grep`, `execute_command`, v.v.
-- **Generic argument extraction**: Tự động extract arguments từ schema
-- **Tool result handling**: Xử lý kết quả tool và gửi cho Notion để tạo response cuối
-- **Multi-turn tool loop**: Hỗ trợ nhiều vòng gọi tool liên tiếp
+- **OpenAI-совместимые эндпоинты:**
+  - `GET /v1/models` — список доступных моделей
+  - `POST /v1/chat/completions` — чат (стриминг SSE + обычный режим)
+  - `GET /healthz` — проверка состояния
+- **Tool calls (function calling):** гейтвей подмешивает схемы инструментов в системный
+  промпт, модель отвечает строгим XML-блоком, гейтвей превращает его в нормальный
+  `tool_calls` в ответе. Результаты инструментов (`role: tool`) принимаются обратно —
+  полный агентский цикл работает.
+- **17 моделей**, включая **GPT-6 Astra** (коднейм Notion `orlando-quinn`).
+- **Мультиаккаунт** с балансировкой и кулдауном упавших аккаунтов.
+- **Админка** в браузере: аккаунты, импорт сессии, конфиг, диалоги, метрики.
+- **Веб-поиск Notion AI**, свежий тред на каждый запрос (меньше глюков контекста).
+- Сохранение сессий в SQLite.
 
-### Quản lý
-- WebUI quản trị tại `/admin`
-- Multi-account pool với load balancing
-- Session persistence qua SQLite
-- Cookie-based authentication
+---
 
-## Cài đặt
+## Поддерживаемые модели
 
-### Yêu cầu
-- Go 1.25.0+ (nếu build từ source)
-- Notion account với AI access
-- Browser cookies từ Notion
+| Model ID | Что это | Провайдер |
+|---|---|---|
+| `gpt-6-astra` | GPT-6 Astra (флагман) | OpenAI |
+| `opus-4.8` | Claude Opus 4.8 | Anthropic |
+| `opus-4.7` | Claude Opus 4.7 | Anthropic |
+| `opus-4.6` | Claude Opus 4.6 | Anthropic |
+| `sonnet-4.6` | Claude Sonnet 4.6 | Anthropic |
+| `haiku-4.5` | Claude Haiku 4.5 (быстрая) | Anthropic |
+| `gpt-5.5` | GPT-5.5 | OpenAI |
+| `gpt-5.4` | GPT-5.4 | OpenAI |
+| `gpt-5.4-mini` | GPT-5.4 Mini | OpenAI |
+| `gpt-5.4-nano` | GPT-5.4 Nano | OpenAI |
+| `gpt-5.2` | GPT-5.2 | OpenAI |
+| `gemini-3.1-pro` | Gemini 3.1 Pro | Google |
+| `gemini-3-flash` | Gemini 3 Flash | Google |
+| `gemini-2.5-flash` | Gemini 2.5 Flash | Google |
+| `grok-4.3` | Grok 4.3 | xAI |
+| `minimax-m2.5` | MiniMax M2.5 | MiniMax |
+| `auto` | автовыбор (deprecated) | system |
 
-### Build từ source
+Актуальный список всегда можно получить запросом `GET /v1/models`.
+
+---
+
+## Быстрый старт
+
+### 1. Требования
+
+- Go 1.25+ (только для сборки из исходников)
+- Аккаунт Notion с доступом к Notion AI (подойдёт Business Trial)
+- Linux / macOS (на Windows — через WSL)
+
+### 2. Сборка
 
 ```bash
-# Clone repository
-git clone https://github.com/YOUR_USERNAME/notion2api-fork.git
-cd notion2api-fork
-
-# Build
-go build -o notion2api ./cmd/notion2api/
-
-# Chạy
-./notion2api --config ./config.example.json
+git clone https://github.com/npukolno/notion2api.git
+cd notion2api
+go build -o notion2api-agent ./cmd/notion2api/
 ```
 
-### Cấu hình
+### 3. Конфиг
 
-Tạo file `config.json` từ mẫu:
+Создай `config.json` (можно скопировать из `config.example.json` и урезать):
 
 ```json
 {
   "host": "127.0.0.1",
   "port": 8787,
-  "api_key": "YOUR_API_KEY",
+  "api_key": "придумай-секретный-ключ",
+  "default_model": "gpt-6-astra",
+  "timeout_sec": 180,
   "admin": {
     "enabled": true,
-    "password": "YOUR_ADMIN_PASSWORD"
+    "password": "придумай-пароль-админки"
   },
-  "probe_json": "probe_files/default/probe.json",
-  "model_id": "auto",
   "features": {
     "use_web_search": true,
-    "enable_generate_image": true
+    "force_fresh_thread_per_request": true
+  },
+  "accounts": []
+}
+```
+
+- `api_key` — ключ, который будешь указывать в клиентах (`Authorization: Bearer ...`).
+- Аккаунты Notion удобнее добавлять через админку (шаг 5), поэтому `accounts` пока пустой.
+
+### 4. Запуск
+
+```bash
+./notion2api-agent --config ./config.json
+```
+
+Сервер поднимется на `http://127.0.0.1:8787`.
+
+### 5. Подключение аккаунта Notion
+
+Нужно всего три вещи: **email**, **данные воркспейса** и **свежая кука `token_v2`**.
+
+**5.1. Узнай ID воркспейса (один раз):**
+
+1. Открой `https://www.notion.so/ai` и залогинься.
+2. Нажми F12 → вкладка **Console**, вставь скрипт `scripts/extract_notion_info.js` (лежит в репозитории), нажми Enter.
+3. Скрипт покажет JSON с `space_id`, `user_id`, `space_view_id`, именем и почтой. Сохрани его.
+
+**5.2. Скопируй свежую куку:**
+
+F12 → **Application** → **Cookies** → `https://www.notion.so` → скопируй значение `token_v2`.
+Кука периодически протухает — это нормально, ниже написано как обновлять.
+
+**5.3. Импортируй аккаунт через админку:**
+
+```bash
+# 1. логин в админку (сохранит куку notion2api_admin)
+curl -c admin.cookie -s http://127.0.0.1:8787/admin/login \
+  -H 'Content-Type: application/json' \
+  -d '{"password":"твой-пароль-админки"}'
+
+# 2. импорт аккаунта (client_version подтянется сам)
+curl -b admin.cookie -s http://127.0.0.1:8787/admin/accounts/manual \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "email": "твоя-почта@gmail.com",
+    "user_id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+    "user_name": "твоё-имя",
+    "space_id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+    "space_view_id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+    "space_name": "твой-воркспейс",
+    "cookie_header": "token_v2=ВСТАВЬ_СВЕЖИЙ_TOKEN_V2",
+    "active": true
+  }'
+```
+
+В ответе должно быть `"success":true, "status":"ready"`. Готово — аккаунт заведён,
+админка также доступна в браузере по `http://127.0.0.1:8787/admin/`.
+
+> Кука — это полный доступ к твоему Notion. Не коммить её, не кидай в чаты,
+> файл с кукой храни с правами `chmod 600`.
+
+### 6. Проверка
+
+```bash
+# список моделей
+curl -s http://127.0.0.1:8787/v1/models \
+  -H "Authorization: Bearer твой-api-ключ" | python3 -m json.tool | head -n 20
+
+# простой чат
+curl -s http://127.0.0.1:8787/v1/chat/completions \
+  -H "Authorization: Bearer твой-api-ключ" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-6-astra",
+       "messages":[{"role":"user","content":"Ответь ровно: ASTRA_OK"}],
+       "stream": false}'
+```
+
+---
+
+## Tool calling (как это работает)
+
+Обычный `notion2api` инструменты не умеет — шлёт только текст. Здесь гейтвей делает три вещи:
+
+1. **Туда:** схемы твоих `tools` превращаются в строгую XML-инструкцию
+   (`<tools_available>` + формат `<tool_calls><call>...`) и добавляются в системный промпт.
+2. **Сюда:** если модель ответила XML-блоком, гейтвей парсит его и отдаёт нормальный
+   `tool_calls` с `finish_reason: tool_calls` — клиент исполняет вызовы сам.
+3. **Обратно:** сообщения с `role: tool` превращаются обратно в текст
+   (`[Tool Result] ...`) и уходят модели следующим туром.
+
+Плюс есть детерминированный синтез: если в промпте явно названа тула и виден аргумент
+(путь с `/`, команда, паттерн), гейтвей соберёт `tool_calls` сам, даже если модель
+ответила прозой.
+
+Пример — просим прочитать файл:
+
+```bash
+curl -s http://127.0.0.1:8787/v1/chat/completions \
+  -H "Authorization: Bearer твой-api-ключ" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-6-astra",
+       "messages":[{"role":"user",
+         "content":"read the file /home/user/project/config.json and tell me the port"}],
+       "tools":[{"type":"function","function":{
+         "name":"read_file","description":"Read a file from disk",
+         "parameters":{"type":"object",
+           "properties":{"path":{"type":"string"}},"required":["path"]}}}],
+       "tool_choice":"auto","stream":false}'
+# → {"choices":[{"finish_reason":"tool_calls","message":{
+#      "role":"assistant","content":null,
+#      "tool_calls":[{"id":"call_0","type":"function",
+#        "function":{"name":"read_file",
+#          "arguments":"{\"path\":\"/home/user/project/config.json\"}"}}]}}]}
+```
+
+Дальше клиент исполняет `read_file` локально и шлёт результат назад:
+
+```json
+{"role":"tool","tool_call_id":"call_0","content":"{\"host\":\"127.0.0.1\",\"port\":8787}"}
+```
+
+— модель отвечает уже по факту: `The port number is 8787.`
+
+Python-пример:
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://127.0.0.1:8787/v1", api_key="твой-api-ключ")
+
+tools = [{"type": "function", "function": {
+    "name": "read_file", "description": "Read a file from disk",
+    "parameters": {"type": "object",
+        "properties": {"path": {"type": "string"}},
+        "required": ["path"]}}}]
+
+first = client.chat.completions.create(
+    model="gpt-6-astra",
+    messages=[{"role": "user",
+               "content": "read the file /home/user/project/config.json"}],
+    tools=tools, tool_choice="auto")
+
+msg = first.choices[0].message
+if msg.tool_calls:
+    call = msg.tool_calls[0]
+    result = open("/home/user/project/config.json").read()  # исполняешь сам
+    second = client.chat.completions.create(
+        model="gpt-6-astra",
+        messages=[
+            {"role": "user",
+             "content": "read the file /home/user/project/config.json"},
+            {"role": "assistant", "content": msg.content,
+             "tool_calls": [{"id": call.id, "type": "function",
+                 "function": {"name": call.function.name,
+                              "arguments": call.function.arguments}}]},
+            {"role": "tool", "tool_call_id": call.id, "content": result}],
+        tools=tools)
+    print(second.choices[0].message.content)
+else:
+    print(msg.content)
+```
+
+---
+
+## Подключение к OpenCode (агент с файлами и инструментами)
+
+В `opencode.jsonc` добавь провайдера:
+
+```jsonc
+"notion": {
+  "api": "openai",
+  "name": "Notion AI",
+  "options": {
+    "baseURL": "http://127.0.0.1:8787/v1",
+    "apiKey": "твой-api-ключ"
+  },
+  "models": {
+    "gpt-6-astra": {"name": "Notion | GPT-6 Astra",
+      "tool_call": true, "reasoning": true, "attachment": true,
+      "temperature": true,
+      "modalities": {"input": ["text", "image"], "output": ["text"]}}
   }
 }
 ```
 
-### Lấy Notion Cookies
+Перезапусти OpenCode (конфиг читается на старте) и выбери модель `notion/gpt-6-astra`.
+Агент сможет вызывать инструменты, читать/писать файлы через тулколлы моста.
 
-1. Đăng nhập vào Notion trong trình duyệt
-2. Sử dụng script `convert_cookies.sh` để chuyển đổi cookies:
-   ```bash
-   ./convert_cookies.sh cookies-export.json
-   ```
-3. Copy kết quả vào `probe_files/default/probe.json`
-
-## Sử dụng
-
-### Chat completions
-
-```bash
-curl http://127.0.0.1:8787/v1/chat/completions \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "opus-4.8",
-    "messages": [{"role": "user", "content": "Hello!"}],
-    "stream": false
-  }'
-```
-
-### Tool calls (Function calling)
-
-```bash
-curl http://127.0.0.1:8787/v1/chat/completions \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "opus-4.8",
-    "messages": [{"role": "user", "content": "Read /tmp/test.txt"}],
-    "tools": [{
-      "type": "function",
-      "function": {
-        "name": "read_file",
-        "description": "Read a local file",
-        "parameters": {
-          "type": "object",
-          "properties": {
-            "file_path": {"type": "string"}
-          },
-          "required": ["file_path"]
-        }
-      }
-    }],
-    "tool_choice": "auto",
-    "stream": false
-  }'
-```
-
-Response sẽ chứa `tool_calls` với arguments được extract tự động:
-
-```json
-{
-  "choices": [{
-    "finish_reason": "tool_calls",
-    "message": {
-      "role": "assistant",
-      "tool_calls": [{
-        "id": "call_0",
-        "type": "function",
-        "function": {
-          "name": "read_file",
-          "arguments": "{\"file_path\":\"/tmp/test.txt\"}"
-        }
-      }]
-    }
-  }]
-}
-```
-
-### Tool result follow-up
-
-Sau khi nhận tool_calls, client thực thi tool và gửi kết quả lại:
-
-```bash
-curl http://127.0.0.1:8787/v1/chat/completions \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "opus-4.8",
-    "messages": [
-      {"role": "user", "content": "Read /tmp/test.txt"},
-      {"role": "assistant", "content": null, "tool_calls": [...]},
-      {"role": "tool", "tool_call_id": "call_0", "content": "file content here"}
-    ],
-    "tools": [...],
-    "stream": false
-  }'
-```
-
-## Deploy với Cloudflare Tunnel
-
-Để expose API ra internet qua Cloudflare:
-
-```bash
-# Cài cloudflared
-# Đăng nhập Cloudflare
-cloudflared tunnel login
-
-# Tạo tunnel
-cloudflared tunnel create notion-api
-
-# Cấu hình tunnel
-cat > ~/.cloudflared/config.yml << EOF
-tunnel: YOUR_TUNNEL_ID
-credentials-file: /home/user/.cloudflared/YOUR_TUNNEL_ID.json
-ingress:
-  - hostname: notion.yourdomain.com
-    service: http://127.0.0.1:8787
-  - service: http_status:404
-EOF
-
-# Tạo DNS record
-cloudflared tunnel route dns notion-api notion.yourdomain.com
-
-# Chạy tunnel
-cloudflared tunnel run notion-api
-```
-
-## Docker
-
-```bash
-# Sử dụng docker-compose
-docker compose up -d --build
-
-# Hoặc build manual
-docker build -t notion2api .
-docker run -p 8787:8787 -v ./config.json:/app/config.json notion2api
-```
-
-## Phát triển
-
-### Cấu trúc project
-
-```
-notion2api-fork/
-├── cmd/notion2api/          # Entry point
-├── internal/app/            # Core application
-│   ├── main.go              # HTTP handlers
-│   ├── models.go            # Model registry
-│   ├── tool_calls.go        # Tool calls middleware
-│   ├── notion_client.go     # Notion API client
-│   ├── openai_types.go      # OpenAI request/response types
-│   └── ...
-├── static/admin/            # WebUI assets
-├── config.example.json      # Example config
-└── README.md
-```
-
-### Chạy tests
-
-```bash
-go test ./...
-```
-
-### Thêm models mới
-
-1. Tìm codename Notion bằng cách capture network request trong Notion web
-2. Thêm vào `builtinModelDefinitions()` trong `models.go`:
-   ```go
-   {ID: "model-id", Name: "Model Name", NotionModel: "notion-codename", Family: "provider", Group: "group", Enabled: true, Aliases: []string{"alias1", "alias2"}},
-   ```
-3. Build lại và test
-
-## So sánh với upstream
-
-Fork này dựa trên [GALIAIS/Notion2API](https://github.com/GALIAIS/Notion2API) với các bổ sung:
-
-- ✅ Tool calls (function calling) support
-- ✅ Thêm models mới: opus-4.8, gpt-5.5, grok-4.3
-- ✅ Generic argument extraction cho Droid-style tools
-- ✅ Tool result handling và multi-turn support
-- ✅ Preserve probe workspace ID (không bị override)
-
-## License
-
-MIT License - Xem file `LICENSE` để biết chi tiết.
-
-## Credits
-
-- Gốc: [GALIAIS/Notion2API](https://github.com/GALIAIS/Notion2API)
-- Fork với tool calls support bởi community
-
-## Hỗ trợ
-
-- Issues: GitHub Issues
-- Discussions: GitHub Discussions
+> Честная оговорка: синтез тулколлов — эмуляция поверх чата, а не нативный
+> function calling (его нет в самом Notion AI). Лучше всего срабатывает, когда
+> в задаче есть конкретные пути/команды. Иногда модель отвечает прозой вместо
+> вызова — тогда агент просто покажет текст.
 
 ---
 
-**Lưu ý**: Đây là công cụ reverse-engineered, sử dụng Notion AI không chính thức. Sử dụng có trách nhiệm và tuân thủ Terms of Service của Notion.
+## Автозапуск (systemd, Linux)
+
+```bash
+mkdir -p ~/.config/systemd/user
+cat > ~/.config/systemd/user/notion-agent.service <<'EOF'
+[Unit]
+Description=Notion2API agent bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/USER/notion2api
+ExecStart=/home/USER/notion2api/notion2api-agent --config /home/USER/notion2api/config.json
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+EOF
+
+systemctl --user daemon-reload
+systemctl --user enable --now notion-agent
+systemctl --user status notion-agent
+journalctl --user -u notion-agent -f   # логи
+```
+
+---
+
+## Частые проблемы
+
+| Симптом | Причина и что делать |
+|---|---|
+| `401 Token was invalid or expired` | Кука `token_v2` протухла. Скопируй свежую из браузера и повтори импорт через `/admin/accounts/manual`. |
+| `429` / «Notion AI приостановлен» | Notion режет частые запросы, триальные воркспейсы — особенно. Добавь второй аккаунт (автоматом будет round-robin), снизь темп агентских циклов. |
+| `403 trust-rule-denied` | Notion не доверяет сети/VPS. Запускай мост на той же домашней машине/сети, где сидишь в браузере, либо ходи в интернет через домашний IP. |
+| Первый токен идёт ~3 сек | Это задержка самого Notion AI, не лечится. Для «переводчиков» и прочего realtime не годится. |
+| Модель отвечает текстом вместо `tool_calls` | Назови тулу и путь явно в промпте; проверь, что клиент реально шлёт `tools` в запросе. |
+| Админка пишет `admin authentication required` | Сначала `POST /admin/login` с паролем, дальше ходи с кукой `notion2api_admin` или заголовком `X-Admin-Token`. |
+
+---
+
+## Как добавить новую модель
+
+Коднейм Notion подсматривается в сетевых запросах веба Notion AI, дальше правится один файл:
+
+1. `internal/app/models.go` → `builtinModelDefinitions()` — добавить строку:
+   `{ID: "gpt-6-astra", Name: "GPT-6 Astra", NotionModel: "orlando-quinn",
+     Family: "openai", Group: "intelligent", Beta: true, Enabled: true,
+     Aliases: []string{"gpt6astra", "orlando-quinn"}}`
+2. Пересобрать, проверить `GET /v1/models`.
+
+---
+
+## Благодарности
+
+- Оригинал: [GALIAIS/Notion2API](https://github.com/GALIAIS/Notion2API)
+- Tool-calls форк: [sadada754/API_Notion](https://github.com/sadada754/API_Notion)
+- Апстрим Python-версии: [maverickxone/notion2api](https://github.com/maverickxone/notion2api)
+  (оттуда взят коднейм `gpt-6-astra → orlando-quinn`)
+
+## Лицензия
+
+MIT — см. файл `LICENSE`.
