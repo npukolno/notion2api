@@ -593,10 +593,73 @@ func synthesizeToolCall(prompt string, tools []toolDefinition, toolChoice any) (
 	if toolChoiceMode(toolChoice) == "none" {
 		return nil, false
 	}
-	chosen, ok := chooseTool(prompt, tools, toolChoice)
-	if !ok {
+	// Explicit tool_choice name → that tool only (legacy behavior).
+	if chosenName := requestedToolChoiceName(toolChoice); chosenName != "" {
+		for _, tool := range tools {
+			if normalizedToolName(tool.Function.Name) == normalizedToolName(chosenName) {
+				return buildToolCallWithArgs(prompt, tool, "call_0")
+			}
+		}
 		return nil, false
 	}
+	// Otherwise rank ALL tools by score and take the first one whose required
+	// args can actually be inferred. A high score with uninferred args (e.g.
+	// an orchestrator tool needing structured params) must not block a
+	// slightly lower-scoring but fully inferable tool (e.g. task/read/glob).
+	ranked := rankToolsByScore(prompt, tools, toolChoiceMode(toolChoice))
+	for _, rt := range ranked {
+		if calls, ok := buildToolCallWithArgs(prompt, rt.def, "call_0"); ok {
+			return calls, true
+		}
+	}
+	return nil, false
+}
+
+// rankToolsByScore orders tools by prompt-match score (highest first).
+// Tools scoring <= 0 are dropped unless mode is "required".
+func rankToolsByScore(prompt string, tools []toolDefinition, mode string) []scoredToolDef {
+	lowerPrompt := strings.ToLower(prompt)
+	shapedPath := extractLikelyPath(prompt)
+	pathIsFile := shapedPath != "" && regexp.MustCompile(`\.[A-Za-z0-9]{1,8}$`).MatchString(shapedPath)
+	out := []scoredToolDef{}
+	for _, tool := range tools {
+		name := normalizedToolName(tool.Function.Name)
+		desc := strings.ToLower(tool.Function.Description)
+		score := 0
+		if strings.Contains(lowerPrompt, strings.ToLower(tool.Function.Name)) || strings.Contains(lowerPrompt, name) {
+			score += 100
+		}
+		for _, keyword := range intentKeywordsForTool(name, desc) {
+			if strings.Contains(lowerPrompt, keyword) {
+				score += 10
+			}
+		}
+		famText := name + " " + desc
+		isReader := strings.Contains(famText, "read") || strings.Contains(famText, "file") || strings.Contains(famText, "cat") || strings.Contains(famText, "edit") || strings.Contains(famText, "replace") || strings.Contains(famText, "patch")
+		isFinder := strings.Contains(famText, "list") || strings.Contains(famText, "dir") || strings.Contains(famText, "ls") || strings.Contains(famText, "grep") || strings.Contains(famText, "search") || strings.Contains(famText, "find") || strings.Contains(famText, "glob") || strings.Contains(famText, "pattern")
+		if pathIsFile && isReader {
+			score += 5
+		}
+		if !pathIsFile && shapedPath != "" && isFinder {
+			score += 5
+		}
+		if score <= 0 && mode != "required" {
+			continue
+		}
+		out = append(out, scoredToolDef{def: tool, score: score})
+	}
+	sort.Slice(out, func(a, b int) bool { return out[a].score > out[b].score })
+	return out
+}
+
+type scoredToolDef struct {
+	def   toolDefinition
+	score int
+}
+
+// buildToolCallWithArgs infers args for one tool; false if any required arg
+// cannot be inferred from the prompt.
+func buildToolCallWithArgs(prompt string, chosen toolDefinition, callID string) ([]toolCallResult, bool) {
 	args := map[string]any{}
 	params := mapValue(chosen.Function.Parameters["properties"])
 	for name, schema := range params {
@@ -604,15 +667,14 @@ func synthesizeToolCall(prompt string, tools []toolDefinition, toolChoice any) (
 			args[name] = value
 		}
 	}
-	required := requiredParamNames(chosen)
-	for name := range required {
+	for name := range requiredParamNames(chosen) {
 		if _, ok := args[name]; !ok {
 			return nil, false
 		}
 	}
 	argsJSON, _ := json.Marshal(args)
 	return []toolCallResult{{
-		ID:   "call_0",
+		ID:   callID,
 		Type: "function",
 		Function: toolCallFunction{
 			Name:      chosen.Function.Name,
