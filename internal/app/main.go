@@ -2732,6 +2732,9 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	path := r.URL.Path
+	if r.Method == http.MethodPost {
+		log.Printf("[route] %s %s", r.Method, path)
+	}
 	switch {
 	case r.Method == http.MethodGet && path == "/":
 		a.serveIndex(safeWriter)
