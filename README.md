@@ -145,6 +145,39 @@ curl -b admin.cookie -s http://127.0.0.1:8787/admin/accounts/manual \
 В ответе должно быть `"success":true, "status":"ready"`. Готово — аккаунт заведён,
 админка также доступна в браузере по `http://127.0.0.1:8787/admin/`.
 
+### Второй воркспейс (расширение лимитов)
+
+Ошибка `dispatch capacity exceeded: too many concurrent requests` означает, что все
+слоты аккаунтов заняты (по умолчанию слот всего один на аккаунт). Два рычага:
+
+1. **Поднять `max_concurrency`** аккаунту (по 2–3 на воркспейс, больше — риск 429
+   от самого Notion):
+   ```bash
+   curl -b admin.cookie -s http://127.0.0.1:8787/admin/accounts \
+     -H 'Content-Type: application/json' \
+     -d '{"email":"твоя-почта@gmail.com","max_concurrency":2}'
+   ```
+2. **Добавить второй воркспейс** того же аккаунта отдельной записью — у него свой
+   спейс, свои лимиты и свои слоты. Важно: ключ записи (`email`) должен отличаться,
+   иначе импорт перезапишет первый воркспейс. Рабочий приём — плюс-алиас почты
+   (для Gmail это тот же ящик), а внутри — реальные ID второго воркспейса:
+   ```bash
+   curl -b admin.cookie -s http://127.0.0.1:8787/admin/accounts/manual \
+     -H 'Content-Type: application/json' \
+     -d '{
+       "email": "твоя-почта+ws2@gmail.com",
+       "user_id": "тот-же-user-id",
+       "user_name": "твоё-имя",
+       "space_id": "space_id-ВТОРОГО-воркспейса",
+       "space_view_id": "space_view_id-ВТОРОГО-воркспейса",
+       "cookie_header": "token_v2=ТА-ЖЕ-свежая-кука",
+       "active": false
+     }'
+   ```
+   ID второго воркспейса берутся тем же скриптом `scripts/extract_notion_info.js`
+   (выбери другой воркспейс в промпте). Проверка — `GET /admin/accounts` должен
+   показать обе записи со статусом `ready` и разными `space_id`.
+
 > Кука — это полный доступ к твоему Notion. Не коммить её, не кидай в чаты,
 > файл с кукой храни с правами `chmod 600`.
 
