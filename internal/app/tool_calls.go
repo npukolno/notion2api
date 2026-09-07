@@ -402,6 +402,10 @@ func chooseTool(prompt string, tools []toolDefinition, toolChoice any) (toolDefi
 	lowerPrompt := strings.ToLower(prompt)
 	bestScore := -1
 	best := tools[0]
+	// Tie-break by path shape: a file-like path favors read/edit tools,
+	// a directory-like path favors listing/search tools.
+	shapedPath := extractLikelyPath(prompt)
+	pathIsFile := shapedPath != "" && regexp.MustCompile(`\.[A-Za-z0-9]{1,8}$`).MatchString(shapedPath)
 	for _, tool := range tools {
 		name := normalizedToolName(tool.Function.Name)
 		desc := strings.ToLower(tool.Function.Description)
@@ -413,6 +417,15 @@ func chooseTool(prompt string, tools []toolDefinition, toolChoice any) (toolDefi
 			if strings.Contains(lowerPrompt, keyword) {
 				score += 10
 			}
+		}
+		famText := name + " " + desc
+		isReader := strings.Contains(famText, "read") || strings.Contains(famText, "file") || strings.Contains(famText, "cat") || strings.Contains(famText, "edit") || strings.Contains(famText, "replace") || strings.Contains(famText, "patch")
+		isFinder := strings.Contains(famText, "list") || strings.Contains(famText, "dir") || strings.Contains(famText, "ls") || strings.Contains(famText, "grep") || strings.Contains(famText, "search") || strings.Contains(famText, "find") || strings.Contains(famText, "glob") || strings.Contains(famText, "pattern")
+		if pathIsFile && isReader {
+			score += 5
+		}
+		if !pathIsFile && shapedPath != "" && isFinder {
+			score += 5
 		}
 		if score > bestScore {
 			bestScore = score
@@ -434,7 +447,7 @@ func intentKeywordsForTool(name string, description string) []string {
 	// family so Russian prompts ("посмотри файлы в ...") match even when the
 	// tool description is English. Score ties are acceptable — the agent loop
 	// course-corrects on the next turn.
-	fileWordsRU := []string{"файл", "файлы", "файлов", "папка", "папку", "папке", "директория", "директорию", "путь", "пути", "проект", "код"}
+	fileWordsRU := []string{"файл", "файлы", "файлов", "папка", "папку", "папке", "директория", "директорию", "путь", "пути", "проект", "код", "посмотри", "посмотреть", "покажи", "показать"}
 	if strings.Contains(text, "read") || strings.Contains(text, "file") || strings.Contains(text, "cat") {
 		add("read", "open", "view", "inspect", "show file", "xem", "đọc")
 		add("прочитай", "прочти", "прочитать", "открой", "открыть", "покажи файл", "посмотри файл", "содержимое файла", "что внутри", "покажи код")
@@ -678,4 +691,31 @@ func buildChatCompletionWithToolCalls(result InferenceResult, modelID string, in
 		payload["notion_trace"] = buildTrace(result)
 	}
 	return payload
+}
+
+// requestedModelForLog / toolChoiceForLog: one-line request logging helpers.
+func requestedModelForLog(raw any) string {
+	if s, ok := raw.(string); ok && strings.TrimSpace(s) != "" {
+		return strings.TrimSpace(s)
+	}
+	if s := strings.TrimSpace(stringValue(raw)); s != "" {
+		return s
+	}
+	return "?"
+}
+
+func toolChoiceForLog(raw any) string {
+	if raw == nil {
+		return "auto"
+	}
+	if s, ok := raw.(string); ok {
+		if strings.TrimSpace(s) == "" {
+			return "auto"
+		}
+		return strings.TrimSpace(s)
+	}
+	if name := requestedToolChoiceName(raw); name != "" {
+		return "function:" + name
+	}
+	return toolChoiceMode(raw)
 }

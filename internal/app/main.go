@@ -1687,6 +1687,13 @@ func (a *App) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 	toolDefs := parseToolDefinitions(typed.Tools)
 	hasTools := len(toolDefs) > 0
+	if hasTools {
+		toolNames := make([]string, 0, len(toolDefs))
+		for _, t := range toolDefs {
+			toolNames = append(toolNames, t.Function.Name)
+		}
+		log.Printf("[tools] model=%s tools=%d [%s] choice=%s", requestedModelForLog(typed.Model), len(toolDefs), strings.Join(toolNames, ","), toolChoiceForLog(typed.ToolChoice))
+	}
 	messagesWithTools := typed.Messages
 	if hasTools {
 		messagesWithTools = injectToolsIntoMessages(typed.Messages, toolDefs)
