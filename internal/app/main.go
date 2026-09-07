@@ -1754,6 +1754,18 @@ func (a *App) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusOK, buildSyntheticToolCallCompletion(latestPrompt, toolCalls, entry.ID))
 			return
 		}
+		// Multi-turn agent loop: tool results came back — either fire one
+		// follow-up call (e.g. read hit a directory → list it) or terminate
+		// with the result as the final answer.
+		if followCalls, ok := synthesizeFollowupCall(typed.Messages, toolDefs); ok {
+			log.Printf("[tools-followup] model=%s call=%s", entry.ID, followCalls[0].Function.Name)
+			writeJSON(w, http.StatusOK, buildSyntheticToolCallCompletion(latestPrompt, followCalls, entry.ID))
+			return
+		}
+		if finalText, ok := finalTextAfterTools(typed.Messages); ok {
+			writeJSON(w, http.StatusOK, buildFinalTextCompletion(latestPrompt, finalText, entry.ID))
+			return
+		}
 	}
 	freshThreadMode := forceFreshThreadPerRequest(cfg)
 	conversation := ConversationEntry{}

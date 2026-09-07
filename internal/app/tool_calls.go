@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 )
@@ -480,6 +481,11 @@ func intentKeywordsForTool(name string, description string) []string {
 	if strings.Contains(text, "weather") || strings.Contains(text, "location") {
 		add("weather", "city", "location")
 	}
+	if strings.Contains(text, "task") || strings.Contains(text, "agent") || strings.Contains(text, "delegate") || strings.Contains(text, "subagent") || strings.Contains(text, "beru") || strings.Contains(text, "igris") || strings.Contains(text, "tusk") || strings.Contains(text, "tank") || strings.Contains(text, "bellion") {
+		add("task", "agent", "subagent", "delegate", "beru", "background")
+		add("задача", "задачу", "вызови", "вызвать", "делегируй", "делегировать", "подагент", "агент", "агента", "поручи", "поручить", "пусть beru", "beru")
+		add(fileWordsRU...)
+	}
 	return keywords
 }
 
@@ -525,6 +531,18 @@ func inferArgumentValue(prompt string, tool toolDefinition, name string, schema 
 			}
 		case strings.Contains(lowerName, "content") || strings.Contains(lowerName, "text"):
 			if value := extractContent(prompt); value != "" {
+				return value, true
+			}
+		case strings.Contains(lowerName, "subagent") || lowerName == "agent" || lowerName == "agent_type":
+			if value := extractSubagentType(prompt); value != "" {
+				return value, true
+			}
+		case lowerName == "prompt" || lowerName == "task" || lowerName == "query_text":
+			if value := strings.TrimSpace(prompt); value != "" {
+				return value, true
+			}
+		case lowerName == "description" || lowerName == "title" || lowerName == "summary":
+			if value := firstWords(prompt, 5); value != "" {
 				return value, true
 			}
 		case strings.Contains(lowerName, "city") || strings.Contains(lowerName, "location"):
@@ -718,4 +736,209 @@ func toolChoiceForLog(raw any) string {
 		return "function:" + name
 	}
 	return toolChoiceMode(raw)
+}
+
+// firstWords: first N words of a text (for short description params).
+func firstWords(text string, n int) string {
+	words := strings.Fields(text)
+	if len(words) == 0 {
+		return ""
+	}
+	if len(words) > n {
+		words = words[:n]
+	}
+	return strings.Join(words, " ")
+}
+
+// extractSubagentType: known opencode/arise subagent types mentioned in text.
+func extractSubagentType(prompt string) string {
+	lower := strings.ToLower(prompt)
+	for _, t := range []string{"beru", "igris", "bellion", "tusk", "tank", "build", "plan", "explore", "general"} {
+		if strings.Contains(lower, t) {
+			return t
+		}
+	}
+	return "general"
+}
+
+// priorAssistantToolCalls: all tool calls the assistant already made in this
+// conversation (to avoid repeating the same call and to cap chain depth).
+func priorAssistantToolCalls(messagesRaw any) []toolCallFunction {
+	out := []toolCallFunction{}
+	for _, raw := range sliceValue(messagesRaw) {
+		m := mapValue(raw)
+		if m == nil {
+			continue
+		}
+		for _, rawCall := range sliceValue(m["tool_calls"]) {
+			call := mapValue(rawCall)
+			if call == nil {
+				continue
+			}
+			fn := mapValue(call["function"])
+			if fn == nil {
+				continue
+			}
+			out = append(out, toolCallFunction{
+				Name:      strings.TrimSpace(stringValue(fn["name"])),
+				Arguments: strings.TrimSpace(stringValue(fn["arguments"])),
+			})
+		}
+	}
+	return out
+}
+
+func sameToolCall(a toolCallFunction, name, args string) bool {
+	return normalizedToolName(a.Name) == normalizedToolName(name) && strings.TrimSpace(a.Arguments) == strings.TrimSpace(args)
+}
+
+// lastToolResultContent: content of the most recent role=tool message.
+func lastToolResultContent(messagesRaw any) (string, bool) {
+	msgs := sliceValue(messagesRaw)
+	for i := len(msgs) - 1; i >= 0; i-- {
+		m := mapValue(msgs[i])
+		if m == nil {
+			continue
+		}
+		if strings.TrimSpace(stringValue(m["role"])) != "tool" {
+			continue
+		}
+		return flattenContent(m["content"]), true
+	}
+	return "", false
+}
+
+var dirHintPattern = regexp.MustCompile(`(?i)is a directory|not a file|ENOTDIR|является (папкой|директорией)|это (папка|директория)`)
+var deadEndPattern = regexp.MustCompile(`(?i)no such file|not found|ENOENT|не найден|нет такого|permission denied|EACCES|отказано в доступе|invalid arguments|unknown tool|not allowed`)
+
+// synthesizeFollowupCall: after tool results came back, decide the next step.
+// Returns (calls, true) for exactly one follow-up (directory hint), or
+// (nil, false) meaning the loop should terminate with a final text answer.
+func synthesizeFollowupCall(messagesRaw any, tools []toolDefinition) ([]toolCallResult, bool) {
+	result, ok := lastToolResultContent(messagesRaw)
+	if !ok || len(tools) == 0 {
+		return nil, false
+	}
+	prior := priorAssistantToolCalls(messagesRaw)
+	if len(prior) >= 2 {
+		return nil, false // depth cap: max 2 synthesized calls per conversation
+	}
+	if !dirHintPattern.MatchString(result) {
+		return nil, false
+	}
+	goal := latestUserTextFromMessages(messagesRaw)
+	combined := strings.TrimSpace(goal) + "\nPrevious tool result:\n" + strings.TrimSpace(result)
+	// Prefer listing/search tools for the follow-up.
+		bestScore := -1
+	type scoredTool struct {
+		def   toolDefinition
+		score int
+	}
+	ranked := []scoredTool{}
+	lowerCombined := strings.ToLower(combined)
+	for i := range tools {
+		t := tools[i]
+		famText := normalizedToolName(t.Function.Name) + " " + strings.ToLower(t.Function.Description)
+		isFinder := strings.Contains(famText, "list") || strings.Contains(famText, "dir") || strings.Contains(famText, "ls") || strings.Contains(famText, "grep") || strings.Contains(famText, "search") || strings.Contains(famText, "find") || strings.Contains(famText, "glob") || strings.Contains(famText, "pattern")
+		if !isFinder {
+			continue
+		}
+		score := 0
+		if strings.Contains(lowerCombined, normalizedToolName(t.Function.Name)) {
+			score += 100 // the error text itself names the right tool
+		}
+		for _, kw := range intentKeywordsForTool(normalizedToolName(t.Function.Name), strings.ToLower(t.Function.Description)) {
+			if strings.Contains(lowerCombined, kw) {
+				score += 10
+			}
+		}
+		if score > bestScore {
+			bestScore = score
+		}
+		ranked = append(ranked, scoredTool{def: t, score: score})
+	}
+	if len(ranked) == 0 || bestScore <= 0 {
+		return nil, false
+	}
+	sort.Slice(ranked, func(a, b int) bool { return ranked[a].score > ranked[b].score })
+	// Build args directly (no auto-gate here — the follow-up was explicitly
+	// requested by the error signal, not by prompt matching). Try candidates
+	// in score order, skipping exact repeats of prior calls.
+	for ci := range ranked {
+		best := ranked[ci].def
+		args := map[string]any{}
+		params := mapValue(best.Function.Parameters["properties"])
+		for name, schema := range params {
+			if value, ok := inferArgumentValue(combined, best, name, schema); ok {
+				args[name] = value
+			}
+		}
+		complete := true
+		for name := range requiredParamNames(best) {
+			if _, ok := args[name]; !ok {
+				complete = false
+				break
+			}
+		}
+		if !complete {
+			continue
+		}
+		argsJSON, _ := json.Marshal(args)
+		dup := false
+		for _, p := range prior {
+			if sameToolCall(p, best.Function.Name, string(argsJSON)) {
+				dup = true
+				break
+			}
+		}
+		if dup {
+			continue // already tried exactly this — try next candidate
+		}
+		return []toolCallResult{{
+			ID:   fmt.Sprintf("call_%d", len(prior)),
+			Type: "function",
+			Function: toolCallFunction{
+				Name:      best.Function.Name,
+				Arguments: string(argsJSON),
+			},
+		}}, true
+	}
+	return nil, false
+}
+
+// finalTextAfterTools: terminal answer once tool results are in and no
+// follow-up applies — surface the last result as the assistant message so the
+// agent loop ends with data instead of hanging.
+func finalTextAfterTools(messagesRaw any) (string, bool) {
+	result, ok := lastToolResultContent(messagesRaw)
+	if !ok {
+		return "", false
+	}
+	text := strings.TrimSpace(result)
+	if text == "" {
+		return "", false
+	}
+	if len(text) > 4000 {
+		text = text[:4000] + "\n…(truncated)"
+	}
+	return text, true
+}
+
+func buildFinalTextCompletion(latestPrompt string, text string, modelID string) map[string]any {
+	_ = latestPrompt
+	return map[string]any{
+		"id":      "chatcmpl-" + strings.ReplaceAll(randomUUID(), "-", ""),
+		"object":  "chat.completion",
+		"created": time.Now().Unix(),
+		"model":   modelID,
+		"choices": []any{map[string]any{
+			"index": 0,
+			"message": map[string]any{
+				"role":    "assistant",
+				"content": text,
+			},
+			"finish_reason": "stop",
+		}},
+		"usage": map[string]any{"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+	}
 }
